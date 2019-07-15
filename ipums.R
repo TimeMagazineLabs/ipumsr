@@ -134,6 +134,29 @@ ipums_field_PUMA <- function(data) {
   return(data);
 }
 
+# RACE AND ETHNICITY
+ipums_field_RACE_ETHNICITY <- function(data) {
+  if (!("RACE" %in% colnames(data) | !("HISPAN" %in% colnames(data)))) {
+    print("Skipping `ipums_field_RACE` since 'RACE' and 'HISPAN' aren't both present.")  
+    return(data);
+  }
+
+  canonical <- as.data.frame(read.csv("./ipumsr/variables/race.csv", stringsAsFactors = F))
+  data$RACE_ETHNICITY <- ""
+
+  data[data$HISPAN != "Not Hispanic", "RACE_ETHNICITY"] <- "Hispanic"
+  
+  for (i in 1:NROW(canonical)) {
+    originalRace = canonical[i,"RACE"]
+    simplifiedRace = canonical[i,"RACE_SIMPLIFIED"]
+    
+    data[data$RACE_ETHNICITY == "" & data$RACE == originalRace, "RACE_ETHNICITY"] <- simplifiedRace
+    
+    #print(paste("Converted", originalRace, "to", simplifiedRace));
+  }
+  return(data);
+}
+
 # EDUCATION
 ipums_field_EDUC <- function(data) {
   if (!("EDUC" %in% colnames(data))) {
