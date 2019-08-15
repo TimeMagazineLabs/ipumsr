@@ -30,11 +30,27 @@ Then import your data:
 
 Depending how much data you asked for, this can take several minutes. Time for a coffee break.
 
+## Loading the data
+
+You can import the data easily after loading this library:
+
+  source("ipumsr/ipums.R")
+  ipums <- ipums_load("./data/usa_00185.sav")
+  data <- ipums
+
+While it isn't required to duplicate the import into a second variable--`data`, in this case--I highly recommend it. There's a good chance you'll adulterate the data by accident, and this prevents you from having to reload the extract each time you start over. It's best to think of `ipums` as immutable.
+
+### Common warnings, and why not to panic
+
 When the data is loaded, there's a good chance you'll get a warning message like this:
 
-  1: In read.spss("./data/usa_00001.sav", to.data.frame = TRUE) :
+  1: In read.spss(filepath, to.data.frame = TRUE) :
+    Duplicated levels in factor CITY: Cohoes, NY, Lebanon, PA, North Providence, RI, San Angelo, TX, Vallejo, CA, Wilkinsburg, PA
+  2: In read.spss(filepath, to.data.frame = TRUE) :
     Duplicated levels in factor BPLD: Br. Virgin Islands, ns
-  2: In read.spss("./data/usa_00001.sav", to.data.frame = TRUE) :
-    Duplicated levels in factor YRNATUR: 1925 (1925 or earlier, ACS/PRCS pre 2012)
 
-*Don't panic*. In the 181 extracts I've requested to date, this has never caused an actual problem.
+*Remain calm*. In the 181 extracts I've requested to date, this has never caused an actual problem. As far as I can tell, this most often happens with variables that are not present in the requested data. For example, while we do see two codes for "Cohoes, NY" in this extract from 2017 and 1960, neither are available:
+
+![Warning message](images/warning_message.png)
+
+And even if they were present, converting from a factor to a character string should resolve this.

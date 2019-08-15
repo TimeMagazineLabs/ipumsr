@@ -51,17 +51,16 @@ ipums_convert_factors <- function(ipums) {
 }
 
 ipums_convert_AGE <- function(data) {
-  keys = names(data)[grepl("^AGE", names(data))];
+  keyNew = "AGEN";
+  data[,keyNew] <- as.character(data[,"AGE"]);
+  data[!is.na(data[[keyNew]]) & data[[keyNew]] == "Less than 1 year old",keyNew] <- "0"
+  data[!is.na(data[[keyNew]]) & data[[keyNew]] == "90 (90+ in 1980 and 1990)",keyNew] <- "90"
+  data[!is.na(data[[keyNew]]) & data[[keyNew]] == "100 (100+ in 1960-1970)",keyNew] <- "100"
+  data[!is.na(data[[keyNew]]) & data[[keyNew]] == "112 (112+ in the 1980 internal data)",keyNew] <- "112"
+  data[!is.na(data[[keyNew]]) & data[[keyNew]] == "115 (115+ in the 1990 internal data) ",keyNew] <- "115"
 
-  for (key in keys) {
-    print(key);
-    keyNew = paste(key, "N", sep="");
-    data[,keyNew] <- as.character(data[,key]);
-    data[!is.na(data[[keyNew]]) & data[[keyNew]] == "Less than 1 year old",keyNew] <- "0"
-    data[!is.na(data[[keyNew]]) & data[[keyNew]] == "90 (90+ in 1980 and 1990)",keyNew] <- "90"
-    data[,keyNew] <- as.numeric(data[,keyNew])
-  }
-  
+  data[,keyNew] <- as.numeric(data[,keyNew])
+
   return(data)
 }
 
@@ -220,4 +219,32 @@ ipums_field_OCCSOC <- function(data) {
   }
   
   return(data)  
+}
+
+
+# BIRTHPLACE
+ipums_field_BPL <- function(data) {
+  if (!("BPL" %in% colnames(data))) {
+    print("Skipping `ipums_field_BPL` since 'BPL' isn't present.")  
+    return(data);
+  }
+  
+  print("Adding OCCSOC occupation names")
+  
+  # hand-crafted file that converts the OCCSOC codes to descriptions, including condensed categories
+  canonical <- as.data.frame(read.csv("./ipumsr/variables/birthplace.csv", stringsAsFactors = F))
+
+  keys = names(data)[grepl("^BPL(_[A-Z0-9]+)?$", names(data))];
+
+  for (key in keys) {
+    newKey = gsub("BPL", "BORN_US", key)
+    print(newKey)
+    
+    #keyBornUS = paste(key, "_SIMPLIFIED", sep="");
+    #keyHasDegree = paste(key, "_HAS_DEGREE", sep="");
+    #print(paste("Simplifying", key, "into", paste("'", keySimplified, "'", sep=""), "and", paste("'", keyHasDegree, "'", sep="")))
+    #data[keySimplified] <- ""
+    #data[keyHasDegree] <- ""
+  }
+  
 }
