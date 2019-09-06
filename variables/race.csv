@@ -1,10 +1,1 @@
-RACE,RACE_SIMPLIFIED
-American Indian or Alaska Native,American Indian or Alaska Native
-Chinese,Asian
-Other Asian or Pacific Islander,Asian
-Three or more major races,Multiracial
-White,White
-Black/African American/Negro,Black
-Japanese,Asian
-"Other race, nec",Other
-Two major races,Multiracial
+RACE,RACE_SIMPLIFIEDAmerican Indian or Alaska Native,American Indian or Alaska NativeChinese,AsianOther Asian or Pacific Islander,AsianThree or more major races,MultiracialWhite,WhiteBlack/African American/Negro,BlackJapanese,Asian"Other race, nec",OtherTwo major races,Multiracial
