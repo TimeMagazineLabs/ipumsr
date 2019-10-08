@@ -1,6 +1,6 @@
 # some convenience functions for dealing with IPUMS imports in SPSS format
 
-#install.packages("foreign");
+library(tidyverse)
 library(foreign)
 library(stringr)
 
@@ -37,15 +37,53 @@ ipums_load <- function(filepath) {
 }
 
 ipums_field_AGE <- function(data) {
-  data$AGEN <- as.character(data[,"AGE"]);
-  data[!is.na(data$AGEN) & data$AGEN == "Less than 1 year old", "AGEN"] <- "0"
-  data[!is.na(data$AGEN) & data$AGEN == "90 (90+ in 1980 and 1990)", "AGEN"] <- "90"
-  data[!is.na(data$AGEN) & data$AGEN == "100 (100+ in 1960-1970)", "AGEN"] <- "100"
-  data[!is.na(data$AGEN) & data$AGEN == "112 (112+ in the 1980 internal data)", "AGEN"] <- "112"
-  data[!is.na(data$AGEN) & data$AGEN == "115 (115+ in the 1990 internal data) ", "AGEN"] <- "115"
+  #data$AGEN <- as.character(data[,"AGE"]);
+  #data[!is.na(data$AGEN) & (data$AGEN == "Less than 1 year old" | data$AGEN == "Under 1 year"), "AGEN"] <- "0"
 
-  data$AGE <- as.numeric(data$AGEN)
-  data <- subset(data, select=-AGEN)
+  values <- levels(data$AGE)
+  
+  # Descriptions of less than 1 is "0"
+  values <- replace(values, values == "Less than 1 year old" | values == "Under 1 year", "0")
+  
+  # Descriptions of an age following by specification is just the year
+  # E.g. "90 (90+ in 1980 and 1990)"
+  values <- lapply(values, function(x) {
+    if (grepl("^[0-9]+ ", x)) {
+      x = str_split(x, " ")[[1]][[1]]
+    }
+    x = str_replace(x, "\\+", "")
+    return(x)
+  })
+  
+  valuesAsYears <- as.numeric(values)
+  
+  levels(data$AGE) <- valuesAsYears  
+  
+  data$AGE <- as.numeric(data$AGE)
+
+  return(data)
+}
+
+ipums_field_AGE_COHORT <- function(data, targetYear, source="CENSUS") {
+  if (!"YEAR_BORN" %in% colnames(data)) {
+    return(data)
+  }
+  
+  fpath = file.path(ipums_DIR, "variables", "age_cohorts.csv")
+  canonical <- as.data.frame(read.csv(fpath, stringsAsFactors = F))
+  canonical <- canonical[canonical$Source == source,]
+  data$AGE_COHORT <- NA
+  
+  data$TARGET_AGE <- targetYear - data$YEAR_BORN
+
+  for (i in 1:NROW(canonical)) {
+    maxAge = canonical[i,"MAX"]
+    cohort = canonical[i,"AGE_COHORT"]
+    data[is.na(data$AGE_COHORT) & data$TARGET_AGE <= maxAge, "AGE_COHORT"] <- cohort
+    print(paste("Added age cohort", cohort));
+  }
+  
+  data <- subset(data, select = -TARGET_AGE )
 
   return(data)
 }
@@ -108,7 +146,7 @@ ipums_field_COUNTY_FIPS <- function(data) {
 }
 
 # add names of PUMAs
-ipums_field_PUMA <- function(data) {
+ipums_field_PUMA_CODE <- function(data) {
   if (!("PUMA" %in% colnames(data))) {
     print("Skipping `ipums_field_PUMA` since 'PUMA' isn't present.");
     return(data);
@@ -119,30 +157,49 @@ ipums_field_PUMA <- function(data) {
     data <- ipums_field_STATEFIP(data);
   }
 
-  data$PUMA_CODE <- as.factor(paste(data$STATE_FIPS, str_pad(data$PUMA, 5, pad="0")))
+  data$PUMA_CODE <- as.factor(paste0(data$STATE_FIPS, str_pad(data$PUMA, 5, pad="0")))
 
   return(data);
+}
+
+ipums_field_DENSITY <- function(data, popYear=2017) {
+  data$PUMA_CODE <- as.character(data$PUMA_CODE)
   
-  #fpath = file.path(ipums_DIR, "variables", "pumas.csv")
-  #canonical <- read.csv(fpath, header=TRUE, colClasses=c(rep("character", 3), rep("integer", 2), rep("numeric", 6)))
+  fpath = file.path(ipums_DIR, "variables", "pumas.csv")
+  pumas <- read.csv(fpath, header=TRUE, colClasses = c(rep("character", 3), rep("numeric", 8)), stringsAsFactors = F)
+  pumas <- pumas %>% filter(USPS != "PR")
   
-  #puma_list$PUMA_DENSITY <- puma_list$POP10 / puma_list$ALAND_SQMI
-  #canonical <- setNames(canonical[,c("PUMA_CODE", "PUMA_NAME", "ALAND_SQMI")], c("PUMA_CODE", "PUMA_NAME", "PUMA_SQMI"))
+  pumaPopulation <- data %>%
+    filter(YEAR == popYear) %>%
+    group_by(STATE_NAME, STATE_ABBR, STATE_FIPS, PUMA_CODE) %>%
+    summarize(
+      n = n(),
+      POP = sum(PERWT),
+      HH = sum(HHWT)
+    )
   
-  #convertField <- function(row) {
-    #code = row$PUMA_CODE
-    #return (data);
-  #}
+  pumas <- merge(pumas, pumaPopulation, by="PUMA_CODE")
+  pumas <- pumas[,c("PUMA_CODE", "STATE_ABBR", "PUMA_NAME", "POP", "HH", "ALAND_SQMI")]
+  pumas$DENSITY_HH <- pumas$HH / pumas$ALAND_SQMI
+  pumas$DENSITY_POP <- pumas$POP / pumas$ALAND_SQMI
   
-  #for (i in 1:NROW(canonical)) {
-    #print(paste(i, canonical[i,"BPL"]));
-    #data <- convertField(canonical[i,])
-  #}  
+  #pumas$URBAN_STATUS <- NA  
+  #pumas[pumas$METRO=="In metropolitan area: In central/principal city", "URBAN_STATUS"] <- "Urban"
+  #pumas[pumas$METRO=="In metropolitan area: Not in central/principal city", "URBAN_STATUS"] <- "Suburban"
+  #pumas[pumas$METRO=="Not in metropolitan area", "URBAN_STATUS"] <- "Rural"
+  #summary(pumas[pumas$URBAN_STATUS == "Urban", "DENSITY"])
+  #summary(pumas[pumas$URBAN_STATUS == "Suburban", "DENSITY"])
+  #summary(pumas[pumas$URBAN_STATUS == "Rural", "DENSITY"])
+
+  # Imputed
+  #pumas[is.na(pumas$URBAN_STATUS) & pumas$DENSITY > 7500, "URBAN_STATUS"] <- "Urban"
+  #pumas[is.na(pumas$URBAN_STATUS) & pumas$DENSITY > 1000, "URBAN_STATUS"] <- "Suburban"
+  #summary(pumas[is.na(pumas$URBAN_STATUS), "DENSITY"])
+  #pumas[is.na(pumas$URBAN_STATUS), "URBAN_STATUS"] <- "Rural"
   
-  
-  #data <- merge(data, puma_names, by="PUMA_CODE")
-    
-  #return(data);
+  data <- left_join(data, pumas[,c("PUMA_CODE", "DENSITY_HH", "DENSITY_POP")], by="PUMA_CODE")
+
+  return(data);
 }
 
 # RACE AND ETHNICITY
@@ -178,25 +235,29 @@ ipums_field_RACE_ETHNICITY <- function(data) {
 
 # EDUCATION
 ipums_field_EDUC <- function(data) {
-  if (!("EDUCD" %in% colnames(data))) {
-    print("Skipping `ipums_field_EDUC` since 'EDUCD' isn't present.")  
+  if (!("EDUC" %in% colnames(data))) {
+    print("Skipping `ipums_field_EDUC` since 'EDUC' isn't present.")  
     return(data);
+  }
+  
+  sourceKey = "EDUCD"
+
+  if (!("EDUCD" %in% colnames(data))) {
+    sourceKey = "EDUC"
   }
 
   # hand-crafted file that converts the many EDUCD values to more general categories
   fpath = file.path(ipums_DIR, "variables", "educd.csv")
   canonical <- as.data.frame(read.csv(fpath, stringsAsFactors = F))
   
-  #keys = names(data)[grepl("^EDUCD(_[A-Z]+)?$", names(data))];
-  
-  print("Simplifying EDUCD into EDUC_SIMPLIFIED and EDUC_HAS_DEGREE");
+  print(paste("Simplifying", sourceKey, "into EDUC_SIMPLIFIED and EDUC_HAS_DEGREE"));
   data$EDUC_SIMPLIFIED <- ""
   data$EDUC_HAS_DEGREE <- ""
 
   convertField <- function(row) {
     original <- as.character(row[1]);
-    data[!is.na(data$EDUCD) & data$EDUCD == original, "EDUC_SIMPLIFIED"] <- as.character(row[2])      
-    data[!is.na(data$EDUCD) & data$EDUCD == original, "EDUC_HAS_DEGREE"] <- as.character(row[3])      
+    data[!is.na(data[[sourceKey]]) & data[[sourceKey]] == original, "EDUC_SIMPLIFIED"] <- as.character(row[2])      
+    data[!is.na(data[[sourceKey]]) & data[[sourceKey]] == original, "EDUC_HAS_DEGREE"] <- as.character(row[3])      
     return (data);
   }
     
@@ -207,7 +268,10 @@ ipums_field_EDUC <- function(data) {
   data$EDUC_SIMPLIFIED <- as.factor(data$EDUC_SIMPLIFIED)
   data$EDUC_HAS_DEGREE <- as.logical(data$EDUC_HAS_DEGREE)
 
-  data <- subset(data, select = -c(EDUC, EDUCD ))
+  data <- subset(data, select = -EDUC)
+  if ("EDUCD" %in% colnames(data)) {
+    data <- subset(data, select = -EDUCD)
+  }
   
   return(data);
 }
@@ -273,7 +337,7 @@ ipums_field_OCCSOC <- function(data) {
   }
   
   for (i in 1:NROW(canonical)) {
-    print(paste(i, canonical[i,"OCCSOC_TITLE"]));
+    #print(paste(i, canonical[i,"OCCSOC_TITLE"]));
     data <- convertField(canonical[i,])
   }
   
@@ -285,7 +349,7 @@ ipums_field_OCCSOC <- function(data) {
 
 
 # BIRTHPLACE
-ipums_field_BPL <- function(data) {
+ipums_field_BPL <- function(data, source="ACS") {
   if (!("BPL" %in% colnames(data))) {
     print("Skipping `ipums_field_BPL` since 'BPL' isn't present.")  
     return(data);
@@ -296,7 +360,8 @@ ipums_field_BPL <- function(data) {
   # hand-crafted file that converts the OCCSOC codes to descriptions, including condensed categories
   fpath = file.path(ipums_DIR, "variables", "birthplace.csv")
   canonical <- as.data.frame(read.csv(fpath, stringsAsFactors = F))
-
+  canonical <- canonical[grepl(source, canonical$Source),]
+  
   convertField <- function(row) {
     location = row$BPL
     bornInUS = row$BORN_US
@@ -314,7 +379,7 @@ ipums_field_BPL <- function(data) {
 }
 
 # CITIZENSHIP
-ipums_field_CITIZEN <- function(data) {
+ipums_field_CITIZEN <- function(data, source="ACS") {
   if (!"CITIZEN" %in% colnames(data)) {
     print("Skipping `ipums_field_CITIZEN` since 'CITIZEN' isn't present.")  
     return(data);
@@ -325,6 +390,7 @@ ipums_field_CITIZEN <- function(data) {
   # hand-crafted file that converts the OCCSOC codes to descriptions, including condensed categories
   fpath = file.path(ipums_DIR, "variables", "citizen.csv")
   canonical <- as.data.frame(read.csv(fpath, stringsAsFactors = F))
+  canonical <- canonical[grepl(source, canonical$Source),]
   
   convertField <- function(row) {
     status = row$CITIZEN
@@ -344,6 +410,10 @@ ipums_field_CITIZEN <- function(data) {
 
 # Whether a person is eligible to vote
 ipums_field_VOTING_ELIGIBLE <- function(data, electionYear, includeBirthQuarter = F) {
+  if ("YEAR_BORN" %in% colnames(data)) {
+    data$BIRTHYR <- data$YEAR_BORN
+  }
+  
   if (!"AGE" %in% colnames(data) & !"BIRTHYR" %in% colnames(data)) {
     print("Skipping `ipums_field_VOTING_ELIGIBLE` since neither 'AGE' or 'BIRTHYR' are present. ('BIRTHYR' is preferred).")  
     return(data);
@@ -369,20 +439,44 @@ ipums_field_VOTING_ELIGIBLE <- function(data, electionYear, includeBirthQuarter 
   
   minimumYear <- electionYear - 18;
   
+  keyName = paste0("CAN_VOTE_", electionYear)
+  
   # We'll subtract those who can't vote
-  data$CAN_VOTE <- T;
-  data$CAN_VOTE[!data$IS_CITIZEN] <- F
-  data$CAN_VOTE[data$BIRTHYR > minimumYear] <- F
+  data[[keyName]] <- T;
+  data[[keyName]][!data$IS_CITIZEN] <- F
+  data[[keyName]][data$BIRTHYR > minimumYear] <- F
 
   # This is the closest we can get to eliminating those who turn 18 after Election Day
   if (includeBirthQuarter) {
     print(paste0("Eliminating late ", minimumYear, " babies."))
-    data$CAN_VOTE[data$BIRTHYR == minimumYear & data$BIRTHQTR == "Oct-Nov-Dec"] <- F
+    data[[keyName]][data$BIRTHYR == minimumYear & data$BIRTHQTR == "Oct-Nov-Dec"] <- F
   }
   
   # While institutionalized populations can vote in some cases, this appears to be rare
-  data$CAN_VOTE[data$GQ == "Group quarters--Institutions"] <- F
+  data[[keyName]][data$GQ == "Group quarters--Institutions"] <- F
 
+  if ("YEAR_BORN" %in% colnames(data)) {
+    data <- subset(data, select = -BIRTHYR )
+  }
+  
+  return(data)
+}
+
+ipums_field_YEAR_NATURALIZED <- function(data) {
+  if (!"YRNATUR" %in% colnames(data)) {
+    print("Skipping `ipums_field_YEAR_NATURALIZED` since 'YRNATUR' isn't present.")  
+    return(data);
+  }
+  
+  values <- levels(data$YRNATUR)
+  valuesAsYears <- lapply(values, function(x) {
+    isYr = grepl("^[0-9]{4}", x)
+    return(ifelse(isYr, substr(x, 1, 4), NA))
+  })
+  valuesAsYears <- as.numeric(valuesAsYears)
+  
+  levels(data$YRNATUR) <- valuesAsYears
+  data$YRNATUR <- as.numeric(data$YRNATUR)
   return(data)
 }
 
@@ -402,3 +496,4 @@ ipums_convert_factors <- function(ipums) {
   
   return(ipums);
 }
+
