@@ -544,4 +544,3 @@ ipums_convert_factors <- function(ipums) {
   
   return(ipums);
 }
-
